@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <gtk/gtk.h>
+#include "kirby.h"
 
 
 static void activate(GtkApplication *app, gpointer user_data) {

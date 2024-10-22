@@ -12,6 +12,7 @@
     libraries = with pkgs; [
       gtk4
       glib
+      pcre2
     ];
   in rec {
     defaultPackage = packages.hmgui;
@@ -24,7 +25,7 @@
         buildInputs       = libraries;
         nativeBuildInputs = with pkgs; [ pkg-config ];
         buildPhase = ''
-          NIX_CFLAGS_COMPILE="$(pkg-config --cflags --libs gtk4 glib-2.0) $NIX_CFLAGS_COMPILE"
+          NIX_CFLAGS_COMPILE="$(pkg-config --cflags --libs gtk4 glib-2.0 libpcre2-8) $NIX_CFLAGS_COMPILE"
           make
         '';
       };
@@ -49,7 +50,7 @@
       ];
 
       shellHook = ''
-          NIX_CFLAGS_COMPILE="$(pkg-config --cflags --libs gtk4 glib-2.0) $NIX_CFLAGS_COMPILE"
+          NIX_CFLAGS_COMPILE="$(pkg-config --cflags --libs gtk4 glib-2.0 libpcre2-8) $NIX_CFLAGS_COMPILE"
       '';
     });
   });
