@@ -10,6 +10,12 @@ typedef struct Arena {
     uint8_t flag;
 } Arena;
 
+
+typedef struct AMeta {
+    size_t size;
+} AMeta;
+
+
 typedef enum ARENA_FLAG {
     ARENA_CANGROW = (1 << 0)
 } ARENA_FLAG;
@@ -18,6 +24,7 @@ typedef enum ARENA_FLAG {
 Arena arena_new();
 bool  arena_delete(Arena *arena);
 void *arena_alloc(Arena *a, size_t size);
-void *arena_calloc(Arena *a, size_t size);
+void *arena_calloc(Arena *a, size_t nmemb, size_t size);
+void *arena_realloc(Arena *a, void *p, size_t size);
 
 static inline void arena_clear(Arena *a) { a->size = 0; }

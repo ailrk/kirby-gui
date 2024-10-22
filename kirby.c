@@ -72,12 +72,3 @@ error:
     exp_close(h);
     exit(EXIT_FAILURE);
 }
-
-
-void kb_exp_free(exp_h *h) {
-    int status = WEXITSTATUS(exp_close(h));
-    if (status != 0 && !is_sighup(status)) {
-        fprintf(stderr, "non zero staus");
-        exit(EXIT_FAILURE);
-    }
-}

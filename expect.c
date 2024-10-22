@@ -39,6 +39,7 @@
 #include <pcre2.h>
 
 #include "expect.h"
+#include "alloc.h"
 
 static void debug_buffer (FILE *, const char *);
 
@@ -309,6 +310,7 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
       h->alloc += h->read_size;
     }
     rs = read (h->fd, h->buffer + h->len, h->read_size);
+
     if (h->debug_fp)
       fprintf (h->debug_fp, "DEBUG: read returned %zd\n", rs);
     if (rs == -1) {

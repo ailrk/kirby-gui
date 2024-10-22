@@ -61,28 +61,69 @@ Arena arena_new() {
     return a;
 }
 
-
+/*! Allocate a block from the arena.
+ *  It will allocate size + sizeof(AMeta) block, and store the
+ *  meta data at the beginning of the block. The returned pointer
+ *  is the pointer to the block + sizeof(AMeta).
+ * */
 void *arena_alloc(Arena *a, size_t size) {
+    size += sizeof(AMeta);
     size = (size + ALIGN) & ~(ALIGN - 1);
 
-    void *start = a->data + a->size;
+    void *p = a->data + a->size;
     if (a->size + size > a->cap) {
         if (!arena_grow(a, a->size + size))
             return NULL;
     }
-    a->size += size;
-    return start;
+    a->size += (size + sizeof(AMeta));
+    ((AMeta *)p)->size = size;
+    return p + sizeof(AMeta);
 }
 
 
-void *arena_calloc(Arena *a, size_t size) {
+void *arena_calloc(Arena *a, size_t nmemb, size_t size) {
     void *p = arena_alloc(a, size);
     if (p == NULL) {
         return NULL;
     }
 
-    memset(p, 0, size);
+    memset(p, 0, nmemb * size);
     return p;
+}
+
+
+/* Reallocate a block allocated by `arena_alloc`. If the new size
+ * is smaller than the old size, don't do anything. If the block
+ * is at the top of the arena, simply bump the size. Otherwise
+ * allocate a new block and memcpy the data to the new location.
+ *
+ * Frequently reallocating blocks in the middle of the arena
+ * is inefficent and should be avoided.
+ * */
+void *arena_realloc(Arena *a, void *p, size_t size) {
+    if (p == NULL) {
+        return arena_alloc(a, size); // fallback to alloc
+    }
+
+    if ((char *)p < a->data || (char *)p > a->data + size)
+        return NULL;
+
+    AMeta  *meta     = (AMeta *)(p - sizeof(AMeta));
+    size_t  old_size = meta->size;
+
+    if (old_size >= size) { // new size is smaller, do nothing.
+        return p;
+    }
+
+    if (a->data + a->size - old_size == p) { // last one, simply bump
+        meta->size = size;
+        a->size    = a->size - old_size + size;
+        return p;
+    }
+
+    void *q = arena_alloc(a, size);
+    memcpy(p, q, sizeof(old_size));
+    return q;
 }
 
 
