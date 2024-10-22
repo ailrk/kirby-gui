@@ -1,5 +1,5 @@
 CC=gcc
-CFILES=kirby.c expect.c
+CFILES=kirby.c expect.c arena.c
 
 hmgui:
 	$(CC) main.c $(CFILES) -o $@
@@ -10,3 +10,5 @@ install:
 
 clean:
 	rm -rf hmgui
+
+-include .local.mk

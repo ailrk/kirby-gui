@@ -1,4 +1,6 @@
 #pragma once
 
+#include "expect.h"
 
-char *kb_get_user();
+exp_h *kb_get_user();
+void   kb_exp_free(exp_h *h);

@@ -1,8 +1,10 @@
 #include "kirby.h"
-#include "expect.h"
 #include "pcre2.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+
 
 #define HM_01 "hm = import <home-manager/modules> { configuration = ~/.config/home-manager/home.nix; pkgs = import <nixpkgs> {}; }\r"
 
@@ -23,8 +25,13 @@ pcre2_code *compile_re(const char *re) {
 }
 
 
-char *kb_get_user() {
-    exp_h *h = exp_spawnl("nix", "repl");
+static inline int is_sighup (int status) {
+  return WIFSIGNALED(status) && WTERMSIG(status) == SIGHUP;
+}
+
+
+exp_h *kb_get_user() {
+    exp_h *h = exp_spawnl("nix", "nix", "repl");
 
     if (exp_printf(h, HM_01) == -1) {
         perror("exp_printf");
@@ -32,8 +39,7 @@ char *kb_get_user() {
     }
 
     pcre2_code *nixrepl_re = compile_re("nix-repl>");
-
-    pcre2_match_data *match_data = pcre2_match_data_create(4, NULL);
+    pcre2_match_data *match_data = pcre2_match_data_create(1, NULL);
     int r = exp_expect(h,
                        (exp_regexp[]){
                         { 100, nixrepl_re, 0 },
@@ -57,12 +63,21 @@ char *kb_get_user() {
             fprintf(stderr, "pcre2 error: %d \n", exp_get_pcre_error(h));
             exit(EXIT_FAILURE);
     }
-    int status = exp_close(h);
-
     pcre2_code_free(nixrepl_re);
     pcre2_match_data_free(match_data);
+
+    return h;
 
 error:
     exp_close(h);
     exit(EXIT_FAILURE);
+}
+
+
+void kb_exp_free(exp_h *h) {
+    int status = WEXITSTATUS(exp_close(h));
+    if (status != 0 && !is_sighup(status)) {
+        fprintf(stderr, "non zero staus");
+        exit(EXIT_FAILURE);
+    }
 }
