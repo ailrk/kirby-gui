@@ -1,5 +1,5 @@
 CC=gcc
-CFILES=kirby.c expect.c arena.c alloc.c
+CFILES=kirby.c expect.c arena.c
 
 kbgui:
 	$(CC) main.c $(CFILES) -o $@

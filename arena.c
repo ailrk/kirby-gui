@@ -7,7 +7,7 @@
 
 #define arena_err(...) fprintf(stderr, "arena: " __VA_ARGS__)
 
-#define MMAP_SIZE  (1ul << 46)
+#define MMAP_SIZE  (1ul << 36)
 #define ALIGN      (sizeof(char *))
 
 

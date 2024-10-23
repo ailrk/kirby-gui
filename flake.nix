@@ -28,7 +28,7 @@
           NIX_CFLAGS_COMPILE="$(pkg-config --cflags --libs gtk4 glib-2.0 libpcre2-8) $NIX_CFLAGS_COMPILE"
           make
         '';
-        # hardeningDisable = [ "all" ];
+        hardeningDisable = [ "all" ];
       };
     };
 

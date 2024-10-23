@@ -58,6 +58,12 @@ typedef struct exp_h exp_h;
 #define exp_set_debug_file(h, fp) ((h)->debug_fp = (fp))
 #define exp_get_debug_file(h) ((h)->debug_fp)
 
+
+/* Initialize expect. */
+void exp_init(void *(*private_malloc)(size_t),
+              void (*priviate_free)(void *),
+              void *(*private_realloc)(void *, size_t));
+
 /* Spawn a subprocess. */
 extern exp_h *exp_spawnvf (unsigned flags, const char *file, char **argv);
 extern exp_h *exp_spawnlf (unsigned flags, const char *file, const char *arg, ...);

@@ -1,0 +1,8 @@
+#!/usr/bin/env expect
+
+spawn nix repl
+expect "nix-repl>"
+send "hm = import <home-manager/modules> { configuration = ~/.config/home-manager/home.nix; pkgs = import <nixpkgs> {}; }\n"
+expect "nix-repl>"
+send "hm.config.kirby\n"
+expect "nix-repl>"

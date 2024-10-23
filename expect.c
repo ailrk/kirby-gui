@@ -1,5 +1,5 @@
 /* miniexpect
- * Copyright (C) 2014 Red Hat Inc.
+ * Copyright (C) 2014 Red Hat Inc
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -39,7 +39,15 @@
 #include <pcre2.h>
 
 #include "expect.h"
-#include "alloc.h"
+
+
+/* Custom allocator */
+void *(*exp_malloc)(size_t size) = NULL;
+void (*exp_free)(void *) = NULL;
+void *(*exp_realloc)(void *ptr, size_t size) = NULL;
+#define malloc(SIZE)       exp_malloc(SIZE)
+#define free(PTR)          exp_free(PTR)
+#define realloc(PTR, SIZE) exp_realloc(PTR, SIZE)
 
 static void debug_buffer (FILE *, const char *);
 
@@ -72,6 +80,19 @@ clear_buffer (exp_h *h)
   h->buffer = NULL;
   h->alloc = h->len = 0;
   h->next_match = -1;
+}
+
+void exp_init(void *(*private_malloc)(size_t),
+              void (*private_free)(void *),
+              void *(*private_realloc)(void *, size_t)) {
+    exp_malloc  = private_malloc;
+    if (exp_malloc == NULL) exp_malloc  = malloc;
+
+    exp_free    = private_free;
+    if (exp_free == NULL) exp_free = free;
+
+    exp_realloc = private_realloc;
+    if (exp_realloc == NULL) exp_realloc = realloc;
 }
 
 int
