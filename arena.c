@@ -1,14 +1,34 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include "arena.h"
 
 
 #define arena_err(...) fprintf(stderr, "arena: " __VA_ARGS__)
 
-#define MMAP_SIZE  (1ul << 36)
+#define MMAP_SIZE  (1ul << 32)
 #define ALIGN      (sizeof(char *))
+
+static void debug_log(Arena *a, bool dump, const char *str, ...) {
+#ifdef ARENA_DEBUG
+    if (!a->debug_fp) return;
+    fprintf(a->debug_fp, "DEBUG: arena dump, ");
+    va_list args;
+    va_start(args, str);
+    vfprintf(a->debug_fp, str, args);
+    va_end(args);
+    if (dump) {
+        fprintf(a->debug_fp, "DEBUG: arena dump, name %s\n", a->name);
+        fprintf(a->debug_fp, "DEBUG: arena dump, size %zu\n", a->size);
+        fprintf(a->debug_fp, "DEBUG: arena dump, cap  %zu\n", a->cap);
+        fprintf(a->debug_fp, "DEBUG: arena dump, data %p\n", a->data);
+        fprintf(a->debug_fp, "DEBUG: arena dump, flag %u\n", a->flag);
+    }
+#endif
+}
 
 
 static bool arena_grow(Arena *a, size_t minsz) {
@@ -29,7 +49,7 @@ static bool arena_grow(Arena *a, size_t minsz) {
 }
 
 
-Arena arena_new() {
+Arena arena_new(const char *name) {
     size_t pgsz = sysconf(_SC_PAGE_SIZE);
     if (pgsz == -1) {
         arena_err("sysconf");
@@ -52,11 +72,16 @@ Arena arena_new() {
     }
 
     Arena a = {
+        .name = name,
         .data = p,
         .cap  = pgsz,
         .size = 0,
-        .flag = ARENA_CANGROW
+        .flag = ARENA_CANGROW,
     };
+
+#ifdef DEBUG
+    a.debug_fp = stdout;
+#endif
 
     return a;
 }
@@ -67,27 +92,32 @@ Arena arena_new() {
  *  is the pointer to the block + sizeof(AMeta).
  * */
 void *arena_alloc(Arena *a, size_t size) {
-    size += sizeof(AMeta);
-    size = (size + ALIGN) & ~(ALIGN - 1);
+    size_t real_size = size + sizeof(AMeta);
+    real_size        = (real_size + ALIGN) & ~(ALIGN - 1);
 
-    void *p = a->data + a->size;
-    if (a->size + size > a->cap) {
-        if (!arena_grow(a, a->size + size))
+    char *p = a->data + a->size;
+    if (a->size + real_size > a->cap) {
+        if (!arena_grow(a, a->size + real_size))
             return NULL;
     }
-    a->size += (size + sizeof(AMeta));
-    ((AMeta *)p)->size = size;
-    return p + sizeof(AMeta);
+
+    a->size += real_size;
+    ((AMeta *)p)->size = real_size - sizeof(AMeta);
+
+    p += sizeof(AMeta);
+    debug_log(a, true, "arena_alloc. p %p\n", p);
+    return (void *)p;
 }
 
 
 void *arena_calloc(Arena *a, size_t nmemb, size_t size) {
-    void *p = arena_alloc(a, size);
+    void *p = arena_alloc(a, nmemb * size);
     if (p == NULL) {
         return NULL;
     }
 
     memset(p, 0, nmemb * size);
+    debug_log(a, true, "arena_calloc. p %p\n", p);
     return p;
 }
 
@@ -102,27 +132,39 @@ void *arena_calloc(Arena *a, size_t nmemb, size_t size) {
  * */
 void *arena_realloc(Arena *a, void *p, size_t size) {
     if (p == NULL) {
-        return arena_alloc(a, size); // fallback to alloc
-    }
-
-    if ((char *)p < a->data || (char *)p > a->data + size)
-        return NULL;
-
-    AMeta  *meta     = (AMeta *)(p - sizeof(AMeta));
-    size_t  old_size = meta->size;
-
-    if (old_size >= size) { // new size is smaller, do nothing.
+        debug_log(a, false, "arena_realloc - alloc. p %p\n", p);
+        p = arena_alloc(a, size); // fallback to alloc
         return p;
     }
 
-    if (a->data + a->size - old_size == p) { // last one, simply bump
+    if ((char *)p < a->data || (char *)p > a->data + size) {
+        debug_log(a, "arena_realloc - out of range. p %p\n", p);
+        return NULL;
+    }
+
+    AMeta  *meta      = (AMeta *)((char *)p - sizeof(AMeta));
+    size_t  old_size  = meta->size;
+
+    if (old_size >= size) { // new size is smaller, do nothing.
+        debug_log(a, true, "arena_realloc - keep. p %p\n", p);
+        return p;
+    }
+
+    if (a->data + a->size - old_size == (char *)p) { // last one, simply bump
         meta->size = size;
-        a->size    = a->size - old_size + size;
+        size_t new_size = a->size - old_size + size;
+        if (new_size > a->cap) {
+            if (!arena_grow(a, new_size))
+                return NULL;
+        }
+        a->size = new_size;
+        debug_log(a, true, "arena_realloc - bump. p %p\n", p);
         return p;
     }
 
     void *q = arena_alloc(a, size);
-    memcpy(p, q, sizeof(old_size));
+    debug_log(a, false, "arena_realloc - alloc & memcpy. p %p\n", q);
+    memcpy(q, p, old_size);
     return q;
 }
 

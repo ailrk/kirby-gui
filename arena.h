@@ -1,13 +1,16 @@
 #pragma once
+#include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 
 typedef struct Arena {
-    char   *data;
-    size_t  size;
-    size_t  cap;
-    uint8_t flag;
+    const char *name;
+    char       *data;
+    size_t      size;
+    size_t      cap;
+    uint8_t     flag;
+    FILE       *debug_fp;
 } Arena;
 
 
@@ -21,7 +24,7 @@ typedef enum ARENA_FLAG {
 } ARENA_FLAG;
 
 
-Arena arena_new();
+Arena arena_new(const char *name);
 bool  arena_delete(Arena *arena);
 void *arena_alloc(Arena *a, size_t size);
 void *arena_calloc(Arena *a, size_t nmemb, size_t size);

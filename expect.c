@@ -42,19 +42,16 @@
 
 
 /* Custom allocator */
-void *(*exp_malloc)(size_t size) = NULL;
-void (*exp_free)(void *) = NULL;
-void *(*exp_realloc)(void *ptr, size_t size) = NULL;
-#define malloc(SIZE)       exp_malloc(SIZE)
-#define free(PTR)          exp_free(PTR)
-#define realloc(PTR, SIZE) exp_realloc(PTR, SIZE)
+void *(*exp_malloc)(size_t size) = malloc;
+void (*exp_free)(void *) = free;
+void *(*exp_realloc)(void *ptr, size_t size) = realloc;
 
 static void debug_buffer (FILE *, const char *);
 
 static exp_h *
 create_handle (void)
 {
-  exp_h *h = malloc (sizeof *h);
+  exp_h *h = exp_malloc (sizeof *h);
   if (h == NULL)
     return NULL;
 
@@ -76,7 +73,7 @@ create_handle (void)
 static void
 clear_buffer (exp_h *h)
 {
-  free (h->buffer);
+  exp_free (h->buffer);
   h->buffer = NULL;
   h->alloc = h->len = 0;
   h->next_match = -1;
@@ -85,14 +82,9 @@ clear_buffer (exp_h *h)
 void exp_init(void *(*private_malloc)(size_t),
               void (*private_free)(void *),
               void *(*private_realloc)(void *, size_t)) {
-    exp_malloc  = private_malloc;
-    if (exp_malloc == NULL) exp_malloc  = malloc;
-
-    exp_free    = private_free;
-    if (exp_free == NULL) exp_free = free;
-
-    exp_realloc = private_realloc;
-    if (exp_realloc == NULL) exp_realloc = realloc;
+    if (private_malloc) exp_malloc = private_malloc;
+    if (private_free) exp_free = private_free;
+    if (private_realloc) exp_realloc = private_realloc;
 }
 
 int
@@ -100,7 +92,7 @@ exp_close (exp_h *h)
 {
   int status = 0;
 
-  free (h->buffer);
+  exp_free (h->buffer);
 
   if (h->fd >= 0)
     close (h->fd);
@@ -109,7 +101,7 @@ exp_close (exp_h *h)
       return -1;
   }
 
-  free (h);
+  exp_free (h);
 
   return status;
 }
@@ -122,7 +114,7 @@ exp_spawnlf (unsigned flags, const char *file, const char *arg, ...)
   va_list args;
   exp_h *h;
 
-  argv = malloc (sizeof (char *));
+  argv = exp_malloc (sizeof (char *));
   if (argv == NULL)
     return NULL;
   argv[0] = (char *) arg;
@@ -130,9 +122,9 @@ exp_spawnlf (unsigned flags, const char *file, const char *arg, ...)
   va_start (args, arg);
   for (i = 1; arg != NULL; ++i) {
     arg = va_arg (args, const char *);
-    new_argv = realloc (argv, sizeof (char *) * (i+1));
+    new_argv = exp_realloc (argv, sizeof (char *) * (i+1));
     if (new_argv == NULL) {
-      free (argv);
+      exp_free (argv);
       va_end (args);
       return NULL;
     }
@@ -141,7 +133,7 @@ exp_spawnlf (unsigned flags, const char *file, const char *arg, ...)
   }
 
   h = exp_spawnvf (flags, file, argv);
-  free (argv);
+  exp_free (argv);
   va_end (args);
   return h;
 }
@@ -312,8 +304,9 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
     r = poll (pfds, 1, timeout);
     if (h->debug_fp)
       fprintf (h->debug_fp, "DEBUG: poll returned %d\n", r);
-    if (r == -1)
+    if (r == -1) {
       return EXP_ERROR;
+    }
 
     if (r == 0)
       return EXP_TIMEOUT;
@@ -324,9 +317,10 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
     if (h->alloc - h->len <= h->read_size) {
       char *new_buffer;
       /* +1 here allows us to store \0 after the data read */
-      new_buffer = realloc (h->buffer, h->alloc + h->read_size + 1);
-      if (new_buffer == NULL)
+      new_buffer = exp_realloc (h->buffer, h->alloc + h->read_size + 1);
+      if (new_buffer == NULL) {
         return EXP_ERROR;
+      }
       h->buffer = new_buffer;
       h->alloc += h->read_size;
     }
@@ -447,14 +441,14 @@ exp_vprintf (exp_h *h, int password, const char *fs, va_list args)
   while (n > 0) {
     r = write (h->fd, p, n);
     if (r == -1) {
-      free (msg);
+      exp_free (msg);
       return -1;
     }
     n -= r;
     p += r;
   }
 
-  free (msg);
+  exp_free (msg);
   return len;
 }
 
