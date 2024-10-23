@@ -305,6 +305,7 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
     if (h->debug_fp)
       fprintf (h->debug_fp, "DEBUG: poll returned %d\n", r);
     if (r == -1) {
+      printf("error r> %d\n", r);
       return EXP_ERROR;
     }
 
@@ -319,6 +320,7 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
       /* +1 here allows us to store \0 after the data read */
       new_buffer = exp_realloc (h->buffer, h->alloc + h->read_size + 1);
       if (new_buffer == NULL) {
+        printf("error buf> %d\n", r);
         return EXP_ERROR;
       }
       h->buffer = new_buffer;
@@ -335,6 +337,8 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
        */
       if (errno == EIO)
         return EXP_EOF;
+
+      printf ("error rs> %d\n", r);
       return EXP_ERROR;
     }
     if (rs == 0)
