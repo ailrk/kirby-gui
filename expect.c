@@ -1,5 +1,5 @@
 /* miniexpect
- * Copyright (C) 2014 Red Hat Inc
+ * Copyright (C) 2014 Red Hat Inc, 2024 Ailrk
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -41,7 +41,7 @@
 #include "expect.h"
 
 
-/* Custom allocator */
+/* Provides custom allocators */
 void *(*exp_malloc)(size_t size) = malloc;
 void (*exp_free)(void *) = free;
 void *(*exp_realloc)(void *ptr, size_t size) = realloc;
@@ -258,10 +258,7 @@ exp_spawnvf (unsigned flags, const char *file, char **argv)
   return NULL;
 }
 
-int
-exp_expect (exp_h *h, const exp_regexp *regexps,
-             pcre2_match_data *match_data)
-{
+int exp_expect (exp_h *h, const exp_regexp *regexps, pcre2_match_data *match_data) {
   time_t start_t, now_t;
   int timeout;
   struct pollfd pfds[1];
@@ -305,7 +302,6 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
     if (h->debug_fp)
       fprintf (h->debug_fp, "DEBUG: poll returned %d\n", r);
     if (r == -1) {
-      printf("error r> %d\n", r);
       return EXP_ERROR;
     }
 
@@ -320,7 +316,6 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
       /* +1 here allows us to store \0 after the data read */
       new_buffer = exp_realloc (h->buffer, h->alloc + h->read_size + 1);
       if (new_buffer == NULL) {
-        printf("error buf> %d\n", r);
         return EXP_ERROR;
       }
       h->buffer = new_buffer;
@@ -338,7 +333,6 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
       if (errno == EIO)
         return EXP_EOF;
 
-      printf ("error rs> %d\n", r);
       return EXP_ERROR;
     }
     if (rs == 0)
@@ -413,12 +407,12 @@ exp_expect (exp_h *h, const exp_regexp *regexps,
   }
 }
 
+
+
 static int exp_vprintf (exp_h *h, int password, const char *fs, va_list args)
   __attribute__((format(printf,3,0)));
 
-static int
-exp_vprintf (exp_h *h, int password, const char *fs, va_list args)
-{
+static int exp_vprintf (exp_h *h, int password, const char *fs, va_list args) {
   char *msg;
   int len;
   size_t n;

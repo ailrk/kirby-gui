@@ -8,30 +8,42 @@
 #include <string.h>
 #include <sys/wait.h>
 
-Arena kb_expect_arena;
-Arena kb_pcre2_arena;
+Arena kb_arena;
+
 
 pcre2_general_context *gctx = NULL;
 pcre2_compile_context *cctx = NULL;
+pcre2_match_context   *mctx = NULL;
+
+
+kb_handle *new_kb_handle () {
+    kb_handle *h  = arena_alloc(&kb_arena, sizeof(kb_handle));
+    h->exp_h      = exp_spawnl ("nix", "nix", "repl", NULL);
+    h->match_data = pcre2_match_data_create (4, gctx);
+    exp_set_debug_file(h->exp_h, h->exp_h->debug_fp);
+    return h;
+}
+
 
 /* The regex indexes. It can be used to lookup the pcre2_code regex in regexes. */
 enum {
-    RE_NIX_REPL_PROMPT = 1,
+    RE_NIX_REPL_PROMPT   = 1,
+    RE_NIX_REPL_OUTPUT,
+    RE_ANSI_CODE,
     RE_END
 };
 
+
 pcre2_code* regexes [RE_END] = {};
 
-#define HM_01 "hm = import <home-manager/modules> { configuration = ~/.config/home-manager/home.nix; pkgs = import <nixpkgs> {}; }\n"
 
 pcre2_code *compile_re (const char *re) {
-    int        errcode;
-    PCRE2_SIZE errffset;
-    char       errmsg[256];
+    int         errcode;
+    PCRE2_SIZE  errffset;
+    char        errmsg[256];
+    pcre2_code *ret;
 
-    pcre2_code *ret = pcre2_compile ((PCRE2_SPTR) re, PCRE2_ZERO_TERMINATED,
-                                     0, &errcode, &errffset, cctx);
-
+    ret = pcre2_compile ((PCRE2_SPTR) re, PCRE2_ZERO_TERMINATED, 0, &errcode, &errffset, cctx);
     if (ret == NULL) {
         pcre2_get_error_message(errcode, (PCRE2_UCHAR8 *) errmsg, sizeof (errmsg));
         fprintf (stderr, "failed to compile regex %s: at offset %zu, %s", re, errffset, errmsg);
@@ -45,33 +57,33 @@ static inline int is_sighup (int status) {
   return WIFSIGNALED (status) && WTERMSIG (status) == SIGHUP;
 }
 
-
-void *kb_pcre2_malloc (PCRE2_SIZE size, void *data) { return arena_alloc (&kb_pcre2_arena, size); }
-void  kb_pcre2_free (void *a, void *b) { return; }
-void *kb_exp_malloc (size_t size) { return arena_alloc (&kb_expect_arena, size); }
-void  kb_exp_free (void *ptr) { return; }
-void *kb_exp_realloc (void *ptr, size_t size) { return arena_realloc (&kb_expect_arena, ptr, size); }
+inline static void *kb_pcre2_malloc (PCRE2_SIZE size, void *data) { return arena_alloc (&kb_arena, size); }
+inline static void  kb_pcre2_free (void *a, void *b) { return; }
+inline static void *kb_exp_malloc (size_t size) { return arena_alloc (&kb_arena, size); }
+inline static void  kb_exp_free (void *ptr) { return; }
+inline static void *kb_exp_realloc (void *ptr, size_t size) { return arena_realloc (&kb_arena, ptr, size); }
 
 
 void kb_init () {
-    kb_pcre2_arena  = arena_new ("kb_pcre2_arena");
-    kb_expect_arena = arena_new ("kb_expect_arena");
+    kb_arena = arena_new ("kb_arena");
     exp_init (kb_exp_malloc, kb_exp_free, kb_exp_realloc);
     gctx = pcre2_general_context_create (kb_pcre2_malloc, kb_pcre2_free, NULL);
     cctx = pcre2_compile_context_create (gctx);
-    regexes[RE_NIX_REPL_PROMPT] = compile_re ("nix-repl>");
+    mctx = pcre2_match_context_create(gctx);
+    regexes[RE_NIX_REPL_PROMPT]   = compile_re ("nix-repl>");
+    regexes[RE_NIX_REPL_OUTPUT]   = compile_re ("(.*)nix-repl>");
+    regexes[RE_ANSI_CODE]   = compile_re ("\e\[[0-9;]*[mGKH]");
 }
 
 
 void kb_end () {
-    arena_delete (&kb_pcre2_arena);
-    arena_delete (&kb_expect_arena);
+    arena_delete (&kb_arena);
 }
 
 
 int kb_expect (exp_h *h, pcre2_match_data *match_data, unsigned count, ...) {
     // Build the exp_regexp array that with a (exp_regexp){ 0 } as the sentinel.
-    exp_regexp *exps = arena_alloc (&kb_expect_arena, sizeof (*exps) * (count + 1));
+    exp_regexp *exps = arena_alloc (&kb_arena, sizeof (*exps) * (count + 1));
     va_list args;
     va_start (args, count);
     int re;
@@ -103,24 +115,78 @@ int kb_expect (exp_h *h, pcre2_match_data *match_data, unsigned count, ...) {
 }
 
 
-exp_h *kb_get_user () {
-    exp_h *h = exp_spawnl("nix", "nix", "repl", NULL);
-    pcre2_match_data *match_data = pcre2_match_data_create (4, gctx);
+static void m_repl_remove_ansii(exp_h *h) {
+    if (h->buffer == NULL) return;
 
-    switch (kb_expect (h, match_data, 1, RE_NIX_REPL_PROMPT)) {
+    // remove ansi color code
+    pcre2_substitute (regexes[RE_ANSI_CODE], (PCRE2_SPTR)h->buffer, h->len, 0,
+                     PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED,
+                     NULL, NULL, // no matching
+                     (PCRE2_SPTR)"", 0,
+                     (PCRE2_UCHAR *)h->buffer, (PCRE2_SIZE *)&h->len);
+}
+
+
+static void e_repl_prompt (kb_handle *h) {
+    switch (kb_expect (h->exp_h, h->match_data, 1, RE_NIX_REPL_PROMPT)) {
         case RE_NIX_REPL_PROMPT: break;
         default:                 exit (EXIT_FAILURE);
     }
+}
 
-    if (exp_printf (h, HM_01) == -1) {
+
+static void e_repl_output (exp_h *h, pcre2_match_data *match_data) {
+    switch (kb_expect (h, match_data, 1, RE_NIX_REPL_OUTPUT)) {
+        case RE_NIX_REPL_OUTPUT: break;
+        default:                 exit (EXIT_FAILURE);
+    }
+}
+
+
+static void repl_load_hm (kb_handle *h) {
+    static const char *cmd = "hm = import <home-manager/modules> { configuration = ~/.config/home-manager/home.nix; pkgs = import <nixpkgs> {}; }\n";
+    if (exp_printf (h->exp_h, "%s", cmd) == -1) {
         perror ("exp_printf");
         exit (EXIT_FAILURE);
     }
 
-    switch (kb_expect (h, match_data, 1, RE_NIX_REPL_PROMPT)) {
-        case RE_NIX_REPL_PROMPT: break;
+    e_repl_prompt(h);
+}
+
+
+static void repl_list_hm_config_xdg (kb_handle *h) {
+    static const char *cmd = "hm.config.xdg\n";
+    if (exp_printf (h->exp_h, "%s", cmd) == -1) {
+        perror ("exp_printf");
+        exit (EXIT_FAILURE);
+    }
+
+    switch (kb_expect (h->exp_h, h->match_data, 1, RE_NIX_REPL_OUTPUT)) {
+        case RE_NIX_REPL_OUTPUT: break;
         default:                 exit (EXIT_FAILURE);
     }
+}
+
+
+static void repl_list_systemd (kb_handle *h) {
+    static const char *cmd = "hm.config.systemd\n";
+    if (exp_printf (h->exp_h, "%s", cmd) == -1) {
+        perror ("exp_printf");
+        exit (EXIT_FAILURE);
+    }
+
+    switch (kb_expect (h->exp_h, h->match_data, 1, RE_NIX_REPL_OUTPUT)) {
+        case RE_NIX_REPL_OUTPUT: break;
+        default:                 exit (EXIT_FAILURE);
+    }
+}
+
+
+kb_handle *kb_get_user (kb_handle *h) {
+    e_repl_prompt (h);
+    repl_load_hm (h);
+    repl_list_hm_config_xdg (h);
+    repl_list_systemd (h);
 
     return h;
 }
