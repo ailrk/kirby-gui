@@ -81,7 +81,7 @@ void kb_end () {
 }
 
 
-int kb_expect (exp_h *h, pcre2_match_data *match_data, unsigned count, ...) {
+int kb_expect (kb_handle *h, unsigned count, ...) {
     // Build the exp_regexp array that with a (exp_regexp){ 0 } as the sentinel.
     exp_regexp *exps = arena_alloc (&kb_arena, sizeof (*exps) * (count + 1));
     va_list args;
@@ -95,7 +95,7 @@ int kb_expect (exp_h *h, pcre2_match_data *match_data, unsigned count, ...) {
     exps[count + 1] = (exp_regexp){0};
 
     // run expect with prepared array.
-    int r = exp_expect (h, exps, match_data);
+    int r = exp_expect (h->exp_h, exps, h->match_data);
     switch (r) {
         case EXP_EOF:
             fprintf (stderr, "unexpected EOF\n");
@@ -107,7 +107,7 @@ int kb_expect (exp_h *h, pcre2_match_data *match_data, unsigned count, ...) {
             perror ("exp_expt");
             exit (EXIT_FAILURE);
         case EXP_PCRE_ERROR:
-            fprintf (stderr, "pcre2 error: %d \n", exp_get_pcre_error (h));
+            fprintf (stderr, "pcre2 error: %d \n", exp_get_pcre_error (h->exp_h));
             exit (EXIT_FAILURE);
         default:
             return r;
@@ -128,16 +128,8 @@ static void m_repl_remove_ansii(exp_h *h) {
 
 
 static void e_repl_prompt (kb_handle *h) {
-    switch (kb_expect (h->exp_h, h->match_data, 1, RE_NIX_REPL_PROMPT)) {
+    switch (kb_expect (h, 1, RE_NIX_REPL_PROMPT)) {
         case RE_NIX_REPL_PROMPT: break;
-        default:                 exit (EXIT_FAILURE);
-    }
-}
-
-
-static void e_repl_output (exp_h *h, pcre2_match_data *match_data) {
-    switch (kb_expect (h, match_data, 1, RE_NIX_REPL_OUTPUT)) {
-        case RE_NIX_REPL_OUTPUT: break;
         default:                 exit (EXIT_FAILURE);
     }
 }
@@ -161,7 +153,7 @@ static void repl_list_hm_config_xdg (kb_handle *h) {
         exit (EXIT_FAILURE);
     }
 
-    switch (kb_expect (h->exp_h, h->match_data, 1, RE_NIX_REPL_OUTPUT)) {
+    switch (kb_expect (h, 1, RE_NIX_REPL_OUTPUT)) {
         case RE_NIX_REPL_OUTPUT: break;
         default:                 exit (EXIT_FAILURE);
     }
@@ -175,7 +167,7 @@ static void repl_list_systemd (kb_handle *h) {
         exit (EXIT_FAILURE);
     }
 
-    switch (kb_expect (h->exp_h, h->match_data, 1, RE_NIX_REPL_OUTPUT)) {
+    switch (kb_expect (h, 1, RE_NIX_REPL_OUTPUT)) {
         case RE_NIX_REPL_OUTPUT: break;
         default:                 exit (EXIT_FAILURE);
     }
