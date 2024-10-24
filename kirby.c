@@ -16,7 +16,7 @@ pcre2_compile_context *cctx = NULL;
 pcre2_match_context   *mctx = NULL;
 
 
-kb_handle *new_kb_handle () {
+kb_handle *kb_handle_new () {
     kb_handle *h  = arena_alloc(&kb_arena, sizeof(kb_handle));
     h->exp_h      = exp_spawnl ("nix", "nix", "repl", NULL);
     h->match_data = pcre2_match_data_create (4, gctx);
@@ -25,16 +25,22 @@ kb_handle *new_kb_handle () {
 }
 
 
+void kb_handle_close (kb_handle *h) {
+    exp_close(h->exp_h);
+    pcre2_match_data_free(h->match_data);
+}
+
+
 /* The regex indexes. It can be used to lookup the pcre2_code regex in regexes. */
 enum {
-    RE_NIX_REPL_PROMPT   = 1,
+    RE_NIX_REPL_PROMPT = 1,
     RE_NIX_REPL_OUTPUT,
     RE_ANSI_CODE,
     RE_END
 };
 
 
-pcre2_code* regexes [RE_END] = {};
+pcre2_code *regexes[RE_END] = {};
 
 
 pcre2_code *compile_re (const char *re) {
@@ -115,15 +121,15 @@ int kb_expect (kb_handle *h, unsigned count, ...) {
 }
 
 
-static void m_repl_remove_ansii(exp_h *h) {
-    if (h->buffer == NULL) return;
+/* remove ansi color code */
+static void remove_ansii (char *buffer, size_t n) {
+    if (buffer == NULL) return;
 
-    // remove ansi color code
-    pcre2_substitute (regexes[RE_ANSI_CODE], (PCRE2_SPTR)h->buffer, h->len, 0,
+    pcre2_substitute (regexes[RE_ANSI_CODE], (PCRE2_SPTR)buffer, n, 0,
                      PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED,
                      NULL, NULL, // no matching
                      (PCRE2_SPTR)"", 0,
-                     (PCRE2_UCHAR *)h->buffer, (PCRE2_SIZE *)&h->len);
+                     (PCRE2_UCHAR *)buffer, (PCRE2_SIZE *)&n);
 }
 
 
@@ -159,10 +165,8 @@ static void repl_list_hm_config_xdg (kb_handle *h) {
     }
 }
 
-
-static void repl_list_systemd (kb_handle *h) {
-    static const char *cmd = "hm.config.systemd\n";
-    if (exp_printf (h->exp_h, "%s", cmd) == -1) {
+static void repl_query (kb_handle *h, const char *q) {
+    if (exp_printf (h->exp_h, "%s", q) == -1) {
         perror ("exp_printf");
         exit (EXIT_FAILURE);
     }
@@ -177,8 +181,9 @@ static void repl_list_systemd (kb_handle *h) {
 kb_handle *kb_get_user (kb_handle *h) {
     e_repl_prompt (h);
     repl_load_hm (h);
-    repl_list_hm_config_xdg (h);
-    repl_list_systemd (h);
+    repl_query(h, "hm.config.xdg\n");
+    repl_query(h, "hm.config.kirby\n");
+    repl_query(h, "hm.config.systemd\n");
 
     return h;
 }

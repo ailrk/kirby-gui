@@ -10,5 +10,6 @@ typedef struct kb_handle {
 
 void       kb_init ();
 void       kb_end ();
-kb_handle *new_kb_handle ();
+kb_handle *kb_handle_new ();
+void       kb_handle_close (kb_handle *);
 kb_handle *kb_get_user (kb_handle *h);

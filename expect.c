@@ -46,11 +46,11 @@ void *(*exp_malloc)(size_t size) = malloc;
 void (*exp_free)(void *) = free;
 void *(*exp_realloc)(void *ptr, size_t size) = realloc;
 
+
 static void debug_buffer (FILE *, const char *);
 
-static exp_h *
-create_handle (void)
-{
+
+static exp_h * create_handle (void) {
   exp_h *h = exp_malloc (sizeof *h);
   if (h == NULL)
     return NULL;
@@ -70,14 +70,14 @@ create_handle (void)
   return h;
 }
 
-static void
-clear_buffer (exp_h *h)
-{
+
+static void clear_buffer (exp_h *h) {
   exp_free (h->buffer);
   h->buffer = NULL;
   h->alloc = h->len = 0;
   h->next_match = -1;
 }
+
 
 void exp_init(void *(*private_malloc)(size_t),
               void (*private_free)(void *),
@@ -87,9 +87,8 @@ void exp_init(void *(*private_malloc)(size_t),
     if (private_realloc) exp_realloc = private_realloc;
 }
 
-int
-exp_close (exp_h *h)
-{
+
+int exp_close (exp_h *h) {
   int status = 0;
 
   exp_free (h->buffer);
@@ -106,9 +105,8 @@ exp_close (exp_h *h)
   return status;
 }
 
-exp_h *
-exp_spawnlf (unsigned flags, const char *file, const char *arg, ...)
-{
+
+exp_h * exp_spawnlf (unsigned flags, const char *file, const char *arg, ...) {
   char **argv, **new_argv;
   size_t i;
   va_list args;
@@ -138,9 +136,8 @@ exp_spawnlf (unsigned flags, const char *file, const char *arg, ...)
   return h;
 }
 
-exp_h *
-exp_spawnvf (unsigned flags, const char *file, char **argv)
-{
+
+exp_h * exp_spawnvf (unsigned flags, const char *file, char **argv) {
   exp_h *h = NULL;
   int fd = -1;
   int err;
@@ -257,6 +254,7 @@ exp_spawnvf (unsigned flags, const char *file, char **argv)
   errno = err;
   return NULL;
 }
+
 
 int exp_expect (exp_h *h, const exp_regexp *regexps, pcre2_match_data *match_data) {
   time_t start_t, now_t;
@@ -408,9 +406,9 @@ int exp_expect (exp_h *h, const exp_regexp *regexps, pcre2_match_data *match_dat
 }
 
 
-
 static int exp_vprintf (exp_h *h, int password, const char *fs, va_list args)
   __attribute__((format(printf,3,0)));
+
 
 static int exp_vprintf (exp_h *h, int password, const char *fs, va_list args) {
   char *msg;
@@ -450,9 +448,8 @@ static int exp_vprintf (exp_h *h, int password, const char *fs, va_list args) {
   return len;
 }
 
-int
-exp_printf (exp_h *h, const char *fs, ...)
-{
+
+int exp_printf (exp_h *h, const char *fs, ...) {
   int r;
   va_list args;
 
@@ -462,9 +459,8 @@ exp_printf (exp_h *h, const char *fs, ...)
   return r;
 }
 
-int
-exp_printf_password (exp_h *h, const char *fs, ...)
-{
+
+int exp_printf_password (exp_h *h, const char *fs, ...) {
   int r;
   va_list args;
 
@@ -474,16 +470,14 @@ exp_printf_password (exp_h *h, const char *fs, ...)
   return r;
 }
 
-int
-exp_send_interrupt (exp_h *h)
-{
+
+int exp_send_interrupt (exp_h *h) {
   return write (h->fd, "\003", 1);
 }
 
+
 /* Print escaped buffer to fp. */
-static void
-debug_buffer (FILE *fp, const char *buf)
-{
+static void debug_buffer (FILE *fp, const char *buf) {
   while (*buf) {
     if (isprint (*buf))
       fputc (*buf, fp);
