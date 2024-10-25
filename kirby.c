@@ -1,8 +1,8 @@
 #include "kirby.h"
 #include "arena.h"
 #include "expect.h"
+#include "nixp.h"
 #include "pcre2.h"
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,30 +17,19 @@ pcre2_match_context   *mctx = NULL;
 
 
 kb_handle *kb_handle_new () {
-    kb_handle *h  = arena_alloc(&kb_arena, sizeof(kb_handle));
+    putenv("TERM=dumb"); // avoid ansii escape code.
+    kb_handle *h  = arena_alloc (&kb_arena, sizeof(kb_handle));
     h->exp_h      = exp_spawnl ("nix", "nix", "repl", NULL);
     h->match_data = pcre2_match_data_create (4, gctx);
-    exp_set_debug_file(h->exp_h, h->exp_h->debug_fp);
+    // exp_set_debug_file (h->exp_h, stdout);
     return h;
 }
 
 
 void kb_handle_close (kb_handle *h) {
-    exp_close(h->exp_h);
-    pcre2_match_data_free(h->match_data);
+    exp_close (h->exp_h);
+    pcre2_match_data_free (h->match_data);
 }
-
-
-/* The regex indexes. It can be used to lookup the pcre2_code regex in regexes. */
-enum {
-    RE_NIX_REPL_PROMPT = 1,
-    RE_NIX_REPL_OUTPUT,
-    RE_ANSI_CODE,
-    RE_END
-};
-
-
-pcre2_code *regexes[RE_END] = {};
 
 
 pcre2_code *compile_re (const char *re) {
@@ -63,6 +52,7 @@ static inline int is_sighup (int status) {
   return WIFSIGNALED (status) && WTERMSIG (status) == SIGHUP;
 }
 
+
 inline static void *kb_pcre2_malloc (PCRE2_SIZE size, void *data) { return arena_alloc (&kb_arena, size); }
 inline static void  kb_pcre2_free (void *a, void *b) { return; }
 inline static void *kb_exp_malloc (size_t size) { return arena_alloc (&kb_arena, size); }
@@ -75,10 +65,7 @@ void kb_init () {
     exp_init (kb_exp_malloc, kb_exp_free, kb_exp_realloc);
     gctx = pcre2_general_context_create (kb_pcre2_malloc, kb_pcre2_free, NULL);
     cctx = pcre2_compile_context_create (gctx);
-    mctx = pcre2_match_context_create(gctx);
-    regexes[RE_NIX_REPL_PROMPT]   = compile_re ("nix-repl>");
-    regexes[RE_NIX_REPL_OUTPUT]   = compile_re ("(.*)nix-repl>");
-    regexes[RE_ANSI_CODE]   = compile_re ("\e\[[0-9;]*[mGKH]");
+    mctx = pcre2_match_context_create (gctx);
 }
 
 
@@ -87,21 +74,9 @@ void kb_end () {
 }
 
 
-int kb_expect (kb_handle *h, unsigned count, ...) {
-    // Build the exp_regexp array that with a (exp_regexp){ 0 } as the sentinel.
-    exp_regexp *exps = arena_alloc (&kb_arena, sizeof (*exps) * (count + 1));
-    va_list args;
-    va_start (args, count);
-    int re;
-    int i;
-    for (i = 0, re = va_arg (args, unsigned); i < count; ++i) {
-        exps[i] = (exp_regexp){ re, regexes[re], 0 };
-    };
-    va_end (args);
-    exps[count + 1] = (exp_regexp){0};
-
+int kb_expect (kb_handle *h, const exp_regexp *regexps) {
     // run expect with prepared array.
-    int r = exp_expect (h->exp_h, exps, h->match_data);
+    int r = exp_expect (h->exp_h, regexps, h->match_data);
     switch (r) {
         case EXP_EOF:
             fprintf (stderr, "unexpected EOF\n");
@@ -121,69 +96,116 @@ int kb_expect (kb_handle *h, unsigned count, ...) {
 }
 
 
+/* consume the next prompt */
+static void prompt (kb_handle *h) {
+    static pcre2_code * re = NULL;
+    if (re == NULL) re = compile_re ("nix-repl>");
+    switch (kb_expect(h,
+                (exp_regexp[]) {
+                    { 100, .re = re },
+                    { 0 }
+                })) {
+        case 100: break;
+        default: exit (EXIT_FAILURE);
+    }
+}
+
+/* Get output. `get` should always follow by a `command`. This makes
+ * sure the expect buffer has the correct content.
+ * */
+static size_t get (kb_handle *h, char **out) {
+    char *p;
+    size_t size;
+    static pcre2_code * re = NULL;
+    if (re == NULL) re = compile_re ("(.*)(?=nix-repl>)");
+    switch (kb_expect(h,
+                (exp_regexp[]) {
+                    { 100, .re = re },
+                    { 0 }
+                })) {
+        case 100: break;
+        default: exit (EXIT_FAILURE);
+    }
+
+    if ((size = h->exp_h->next_match) == -1) {
+        fprintf(stderr, "get");
+        exit(EXIT_FAILURE);
+    }
+
+    p = arena_realloc(&kb_arena, 0, size);
+    memmove(p, h->exp_h->buffer, size);
+    *out = p;
+    return size;
+}
+
+
+/* type enter */
+static void enter (kb_handle *h) {
+    if (exp_printf (h->exp_h, "\n") == -1) {
+        perror ("exp_printf");
+        exit (EXIT_FAILURE);
+    }
+}
+
+
 /* remove ansi color code */
 static void remove_ansii (char *buffer, size_t n) {
-    if (buffer == NULL) return;
-
-    pcre2_substitute (regexes[RE_ANSI_CODE], (PCRE2_SPTR)buffer, n, 0,
-                     PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED,
-                     NULL, NULL, // no matching
-                     (PCRE2_SPTR)"", 0,
-                     (PCRE2_UCHAR *)buffer, (PCRE2_SIZE *)&n);
+    static pcre2_code * re = NULL;
+    if (re == NULL) re = compile_re ("\e\[[0-9;]*[mGKH]");
+    pcre2_substitute (re, (PCRE2_SPTR)buffer, n, 0,
+                      PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED,
+                      NULL, NULL, // no matching
+                      (PCRE2_SPTR)"", 0,
+                      (PCRE2_UCHAR *)buffer, (PCRE2_SIZE *)&n);
 }
 
 
-static void e_repl_prompt (kb_handle *h) {
-    switch (kb_expect (h, 1, RE_NIX_REPL_PROMPT)) {
-        case RE_NIX_REPL_PROMPT: break;
-        default:                 exit (EXIT_FAILURE);
-    }
-}
-
-
-static void repl_load_hm (kb_handle *h) {
-    static const char *cmd = "hm = import <home-manager/modules> { configuration = ~/.config/home-manager/home.nix; pkgs = import <nixpkgs> {}; }\n";
+/* Execute a command. It does the following:
+ * 1. type the command
+ * 2. consume the comamnd string echoed back in the pty
+ * 3. type enter to run the command
+ * */
+static void command (kb_handle *h, const char *cmd) {
     if (exp_printf (h->exp_h, "%s", cmd) == -1) {
         perror ("exp_printf");
         exit (EXIT_FAILURE);
     }
 
-    e_repl_prompt(h);
+    pcre2_code *re = compile_re (cmd);
+    switch (kb_expect(h,
+                (exp_regexp[]) {
+                    { 100, .re = re },
+                    { 0 }
+                })) {
+        case 100: break;
+        default: exit (EXIT_FAILURE);
+    }
+    enter(h);
 }
 
 
-static void repl_list_hm_config_xdg (kb_handle *h) {
-    static const char *cmd = "hm.config.xdg\n";
-    if (exp_printf (h->exp_h, "%s", cmd) == -1) {
-        perror ("exp_printf");
-        exit (EXIT_FAILURE);
-    }
-
-    switch (kb_expect (h, 1, RE_NIX_REPL_OUTPUT)) {
-        case RE_NIX_REPL_OUTPUT: break;
-        default:                 exit (EXIT_FAILURE);
-    }
-}
-
-static void repl_query (kb_handle *h, const char *q) {
-    if (exp_printf (h->exp_h, "%s", q) == -1) {
-        perror ("exp_printf");
-        exit (EXIT_FAILURE);
-    }
-
-    switch (kb_expect (h, 1, RE_NIX_REPL_OUTPUT)) {
-        case RE_NIX_REPL_OUTPUT: break;
-        default:                 exit (EXIT_FAILURE);
+void kb_dump_parsetree(NixpParser *p, const char *input, size_t size) {
+    const NixpToken *tok;
+    for (int i = 0; i < p->next; ++i) {
+        tok = &p->pool[i];
+        printf("%d\n", i);
     }
 }
 
 
-kb_handle *kb_get_user (kb_handle *h) {
-    e_repl_prompt (h);
-    repl_load_hm (h);
-    repl_query(h, "hm.config.xdg\n");
-    repl_query(h, "hm.config.kirby\n");
-    repl_query(h, "hm.config.systemd\n");
-
-    return h;
+void kb_get_config (kb_handle *h, NixpTree *tree) {
+    char *output;
+    prompt (h);
+    command (h, "hm = import <home-manager/modules> { configuration = ~/.config/home-manager/home.nix; pkgs = import <nixpkgs> {}; }");
+    command (h, ":p hm.config.kirby");
+    size_t size = get (h, &output);
+    remove_ansii(output, size);
+    NixpParser p;
+    nixp_init(&p);
+    if (nixp_parse(&p, output, size) >= 0) {
+        nixp_tree(tree, &p, output, size);
+        return;
+    } else {
+        fprintf(stderr, "failed to parse kirby config");
+    }
 }

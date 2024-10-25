@@ -185,7 +185,7 @@ end:
 }
 
 
-static NixpStatus parse_string (NixpParser *p, const char *input, size_t size) {
+static int parse_string (NixpParser *p, const char *input, size_t size) {
     NixpToken *tok;
     int        start;
 
@@ -236,10 +236,13 @@ static NixpStatus parse_string (NixpParser *p, const char *input, size_t size) {
 }
 
 
+/* Parse nix repl output. If it succeed, return number of tokens parsed. Otherwise, return a
+ * negative error code.
+ * */
 int nixp_parse (NixpParser *p, const char *input, size_t size) {
     NixpToken *tok;
     NixpType   type;
-    NixpStatus r;
+    int         r;
     int        count = p->next;
     for (; p->offset < size && input[p->offset] != '\0'; ++p->offset) {
         NixpType type;
@@ -346,4 +349,12 @@ int nixp_parse (NixpParser *p, const char *input, size_t size) {
     }
 
     return count;
+}
+
+
+void nixp_tree (NixpTree *tree, NixpParser *p, const char *input, size_t size) {
+    tree->tree  = p->pool;
+    tree->ntoks = p->next;
+    tree->input = input;
+    tree->size  = size;
 }

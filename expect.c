@@ -34,6 +34,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
+
 
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
@@ -173,7 +175,7 @@ exp_h * exp_spawnvf (unsigned flags, const char *file, char **argv) {
     if (!(flags & EXP_SPAWN_KEEP_SIGNALS)) {
       struct sigaction sa;
       int i;
-
+;
       /* Remove all signal handlers.  See the justification here:
        * https://www.redhat.com/archives/libvir-list/2008-August/msg00303.html
        * We don't mask signal handlers yet, so this isn't completely
@@ -204,6 +206,16 @@ exp_h * exp_spawnvf (unsigned flags, const char *file, char **argv) {
       cfmakeraw (&termios);
       tcsetattr (slave_fd, TCSANOW, &termios);
     }
+
+    /* String longer than the pty row size will be wraped around. e.g
+     * " \b" will be inserted at the end of the line break.
+     * We set the window row to maximum size to avoid this issue. Any
+     * repl output that's shorter than 65535 characters will not be wrapped
+     * around.
+     */
+    struct winsize wsz;
+    wsz.ws_col = (unsigned short)(-1);
+    ioctl(fd, TIOCSWINSZ, &wsz);
 
     /* Set up stdin, stdout, stderr to point to the pty. */
     dup2 (slave_fd, 0);

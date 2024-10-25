@@ -1,5 +1,6 @@
 #pragma once
 #include <stddef.h>
+#include <stdbool.h>
 
 
 typedef enum {
@@ -26,9 +27,6 @@ typedef enum {
 } NixpError;
 
 
-typedef int NixpStatus;
-
-
 typedef struct {
     NixpType type;
     int      start;
@@ -47,5 +45,14 @@ typedef struct {
 } NixpParser;
 
 
+typedef struct {
+    NixpToken  *tree;  // token pool
+    unsigned    ntoks; // number of tokens
+    const char *input; // input
+    size_t      size;  // input size
+} NixpTree;
+
+
 void nixp_init (NixpParser *);
 int  nixp_parse (NixpParser *parser, const char *input, size_t size);
+void nixp_tree (NixpTree *tree, NixpParser *p, const char *input, size_t size);
