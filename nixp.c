@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include "nixp.h"
 #include "arena.h"
@@ -357,4 +358,41 @@ void nixp_tree (NixpTree *tree, NixpParser *p, const char *input, size_t size) {
     tree->ntoks = p->next;
     tree->input = input;
     tree->size  = size;
+}
+
+
+static void nixp_dump_token(FILE *fp, const NixpToken *tok, int toknum, const char *input, size_t size) {
+    if (tok == NULL) {
+        fprintf(fp, "NULL\n");
+    }
+    const char *type;
+    switch (tok->type) {
+    case NIX_UNKNOWN:    type = "NIX_UNKNOWN"; break;
+    case NIX_SET:        type = "NIX_SET"; break;
+    case NIX_LIST:       type = "NIX_LIST"; break;
+    case NIX_LAMBDA:     type = "NIX_LAMBDA"; break;
+    case NIX_PRIMOP:     type = "NIX_PRIMOP"; break;
+    case NIX_REPEATED:   type = "NIX_REPEATED"; break;
+    case NIX_NUMBER:     type = "NIX_NUMBER"; break;
+    case NIX_BOOLEAN:    type = "NIX_BOOLEAN"; break;
+    case NIX_STRING:     type = "NIX_STRING"; break;
+    case NIX_ID:         type = "NIX_ID"; break;
+    case NIX_DERIVATION: type = "NIX_DERIVATION"; break;
+    case NIX_ELLIPSIS:   type = "NIX_ELLIPSIS"; break;
+    case NIX_NULL:       type = "NIX_NULL"; break;
+    }
+
+    fprintf(fp, "TOKEN %d\n", toknum);
+    fprintf(fp, "  type:   %s\n", type);
+    fprintf(fp, "  start:  %d\n", tok->start);
+    fprintf(fp, "  end:    %d\n", tok->end);
+    fprintf(fp, "  size:   %d\n", tok->size);
+    fprintf(fp, "  parent: %d\n", tok->parent);
+    fprintf(fp, "  span:   %.*s\n", tok->end - tok->start, &input[tok->start]);
+}
+
+void nixp_dump(FILE *fp, NixpTree *tree) {
+    for (int i = 0; i < tree->ntoks; ++i) {
+        nixp_dump_token(fp, &tree->tree[i], i, tree->input, tree->size);
+    }
 }
