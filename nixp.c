@@ -63,7 +63,6 @@ static NixpToken *tok_alloc (NixpParser *p) {
     tok->end           = -1;
     tok->size          = 0;
     tok->parent        = -1;
-    tok->nchildren     = 0;
     tok->more_children = NULL;
     memset(tok->children, -1, NIXP_TOK_DIRECT);
 
@@ -249,7 +248,7 @@ static int parse_string (NixpParser *p, const char *input, size_t size) {
 int nixp_parse (NixpParser *p, const char *input, size_t size) {
     NixpToken *tok;
     NixpType   type;
-    int         r;
+    int        r;
     int        count = p->next;
     for (; p->offset < size && input[p->offset] != '\0'; ++p->offset) {
         NixpType type;
@@ -416,6 +415,7 @@ static void build_tree_children (NixpTree *tree, NixpParser *p, const char *inpu
 
     NixpToken *tok;
     NixpToken *parent;
+    int       *nchildren_map = calloc(tree->ntoks, sizeof(unsigned)); // save number of children found so far.
     // loop over the tree bottom up. Ingore leaves and root.
     for (unsigned d = tree->depth - 1; d > 0; d--) {
         for (unsigned i = 0; i < tree->dsize[d]; ++i) {
@@ -423,9 +423,9 @@ static void build_tree_children (NixpTree *tree, NixpParser *p, const char *inpu
             tok       = &tree->tree[tokid];
             parent    = &tree->tree[tok->parent];
 
-            assert(parent->nchildren >= 0);
+            assert(nchildren_map[tok->parent] >= 0);
 
-            unsigned new_nchildren = parent->nchildren + 1;
+            unsigned new_nchildren = nchildren_map[tok->parent] + 1;
             unsigned cidx          = new_nchildren - 1;
 
             if (cidx < NIXP_TOK_DIRECT) {
@@ -463,9 +463,10 @@ static void build_tree_children (NixpTree *tree, NixpParser *p, const char *inpu
             }
 
         next:
-            parent->nchildren = new_nchildren;
+            nchildren_map[tok->parent] = new_nchildren;
         }
     }
+    free(nchildren_map); //  free the scratch memory.
 }
 
 
@@ -548,7 +549,7 @@ static void nixp_dump_token(FILE *fp, const NixpToken *tok, int toknum, const ch
     fprintf (fp, "  size:   %d\n", tok->size);
     fprintf (fp, "  parent: %d\n", tok->parent);
     fprintf (fp, "  child:  ");
-    for (int i = 0; i < tok->nchildren; ++i) {
+    for (int i = 0; i < tok->size; ++i) {
         fprintf (fp, "%d ", nixp_tok_get_child(tok, i));
     }
     fprintf (fp, "\n");

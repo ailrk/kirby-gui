@@ -29,13 +29,14 @@ typedef enum {
 
 
 #define NIXP_TOK_DIRECT   4
-#define NIXP_TOK_INDIRECT 32
+#define NIXP_TOK_INDIRECT 16
 
 
 typedef struct NixpChildren {
     struct NixpChildren *next;
     unsigned             children[NIXP_TOK_DIRECT];
 } NixpChildren;
+
 
 typedef struct NixpToken {
     NixpType       type;
@@ -45,15 +46,16 @@ typedef struct NixpToken {
     int            parent; // parent link
 
     /* Store indecies of children of the token.
+     *
      * The first 4 children are stored directly in the token. More
      * children are stored in NixChildren, which is a linked list
-     * that each node can hold 32 integers.
+     * that each node can hold 32 integers. This allows us to grow
+     * the children with minimal reallocation.
      * */
 
-    /* first 4 children of the token. -1 indicates no child. */
+    /* first several children of the token. -1 indicates no child. */
     int            children[NIXP_TOK_DIRECT];
     NixpChildren  *more_children; // link to extra children.
-    unsigned       nchildren;  // number of children
 } NixpToken;
 
 
