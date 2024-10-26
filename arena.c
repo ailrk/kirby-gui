@@ -86,10 +86,10 @@ Arena arena_new (const char *name) {
     return a;
 }
 
-/*! Allocate a block from the arena.
- *  It will allocate size + sizeof(AMeta) block, and store the
- *  meta data at the beginning of the block. The returned pointer
- *  is the pointer to the block + sizeof(AMeta).
+/* Allocate a block from the arena.
+ * It will allocate size + sizeof(AMeta) block, and store the
+ * meta data at the beginning of the block. The returned pointer
+ * is the pointer to the block + sizeof(AMeta).
  * */
 void *arena_alloc (Arena *a, size_t size) {
     size_t real_size = size + sizeof(AMeta);
@@ -144,13 +144,20 @@ void *arena_realloc (Arena *a, void *p, size_t size) {
 
     AMeta  *meta      = (AMeta *)((char *)p - sizeof(AMeta));
     size_t  old_size  = meta->size;
+    bool    is_last   = a->data + a->size - old_size == (char *)p;
 
-    if (old_size >= size) { // new size is smaller, do nothing.
+    if (old_size >= size) { // new size is smaller.
+        if (is_last) { // last one, we can shrink the size.
+            meta->size = size;
+            a->size = a->size - old_size + size;
+            debug_log(a, true, "arena_realloc - shrink. p %p\n", p);
+            return p;
+        }
         debug_log(a, true, "arena_realloc - keep. p %p\n", p);
         return p;
     }
 
-    if (a->data + a->size - old_size == (char *)p) { // last one, simply bump
+    if (is_last) { // last one, simply bump
         meta->size = size;
         size_t new_size = a->size - old_size + size;
         if (new_size > a->cap) {

@@ -81,9 +81,9 @@ static void clear_buffer (exp_h *h) {
 }
 
 
-void exp_init(void *(*private_malloc)(size_t),
-              void (*private_free)(void *),
-              void *(*private_realloc)(void *, size_t)) {
+void exp_init (void *(*private_malloc)(size_t),
+               void (*private_free)(void *),
+               void *(*private_realloc)(void *, size_t)) {
     if (private_malloc) exp_malloc = private_malloc;
     if (private_free) exp_free = private_free;
     if (private_realloc) exp_realloc = private_realloc;

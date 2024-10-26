@@ -1,5 +1,8 @@
 #include <ctype.h>
+#include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "nixp.h"
 #include "arena.h"
@@ -55,11 +58,14 @@ static NixpToken *tok_alloc (NixpParser *p) {
     }
 
     NixpToken *tok;
-    tok         = &p->pool[p->next++];
-    tok->start  = -1;
-    tok->end    = -1;
-    tok->size   = 0;
-    tok->parent = -1;
+    tok                = &p->pool[p->next++];
+    tok->start         = -1;
+    tok->end           = -1;
+    tok->size          = 0;
+    tok->parent        = -1;
+    tok->nchildren     = 0;
+    tok->more_children = NULL;
+    memset(tok->children, -1, NIXP_TOK_DIRECT);
 
     return tok;
 }
@@ -353,17 +359,170 @@ int nixp_parse (NixpParser *p, const char *input, size_t size) {
 }
 
 
+void static build_tree_dmap (NixpTree *tree, NixpParser *p, const char *input, size_t size) {
+    tree->dmap = arena_calloc(&nixp_tokpool, sizeof(int), p->ntoks);
+
+    // build dcount.
+    unsigned        *dcount = NULL; // number of elements per depth
+    const NixpToken *tok    = NULL;
+    size_t           depth = 1;     // size of dmap
+    size_t           d;             // current depth index
+    int              i;
+    for (i = 0; i < tree->ntoks; ++i) {
+        tok = &tree->tree[i];
+        d   = 0;
+
+        while (tok->parent != -1) {
+            tok = &tree->tree[tok->parent];
+            d++;
+        }
+
+        depth = d + 1 >= depth ? d + 1 : depth;
+        dcount = arena_realloc(&nixp_tokpool, dcount, depth * sizeof(unsigned));
+        dcount[d]++;
+    }
+
+    // build dmap offset.
+    unsigned off = 0;
+    for (int i = 0; i < depth; ++i) {
+        tree->dmap[i] = (int *)(&tree->dmap[depth]) + off;
+        off += dcount[i];
+    }
+
+    // dcount now is used to track the stack top of each depth entry.
+    memset(dcount, 0, sizeof(unsigned) * depth);
+
+    // second pass to assign entries.
+    for (i = 0; i < tree->ntoks; ++i) {
+        tok = &tree->tree[i];
+        d   = 0;
+        while (tok->parent != -1) {
+            tok = &tree->tree[tok->parent];
+            d++;
+        }
+        tree->dmap[d][dcount[d]++] = i;
+    }
+
+    tree->depth = depth;
+    tree->dsize = dcount;
+}
+
+
+/* Build children map */
+static void build_tree_children (NixpTree *tree, NixpParser *p, const char *input, size_t size) {
+    assert(tree->dmap != NULL);
+    assert(tree->dsize != NULL);
+    assert(tree->depth != 0);
+
+    NixpToken *tok;
+    NixpToken *parent;
+    // loop over the tree bottom up. Ingore leaves and root.
+    for (unsigned d = tree->depth - 1; d > 0; d--) {
+        for (unsigned i = 0; i < tree->dsize[d]; ++i) {
+            int tokid = tree->dmap[d][i];
+            tok       = &tree->tree[tokid];
+            parent    = &tree->tree[tok->parent];
+
+            assert(parent->nchildren >= 0);
+
+            unsigned new_nchildren = parent->nchildren + 1;
+            unsigned cidx          = new_nchildren - 1;
+
+            if (cidx < NIXP_TOK_DIRECT) {
+                // handle direct child
+                parent->children[cidx] = tokid;
+                goto next;
+            } else {
+                // indirect child
+                unsigned      nthblk = (cidx - NIXP_TOK_DIRECT) / NIXP_TOK_INDIRECT;
+                unsigned      offset = (cidx - NIXP_TOK_DIRECT) % NIXP_TOK_INDIRECT;
+                NixpChildren *blkp   = parent->more_children;
+                for (unsigned n = nthblk; n >= 0; --n) {
+                    if (blkp == NULL && n == 0) { // allocate
+                            blkp = arena_alloc(&nixp_tokpool, sizeof(NixpChildren));
+                            blkp->children[offset] = tokid;
+                            parent->more_children = blkp;
+                            goto next;
+                    }
+
+                    if (blkp == NULL) {
+                        fprintf(stderr, "expecting token block");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    if (n == 0) {
+                        blkp->children[offset] = tokid;
+                        goto next;
+                    }
+
+                    if (n > 0) {
+                        blkp = blkp->next;
+                        continue;
+                    }
+                }
+            }
+
+        next:
+            parent->nchildren = new_nchildren;
+        }
+    }
+}
+
+
+/* Get nth child of a token. If nth child doesn't exist, return -1. */
+int nixp_tok_get_child(const NixpToken *tok, unsigned nth) {
+    if (nth >= tok->size) {
+        return -1;
+    }
+
+    if (nth < NIXP_TOK_DIRECT) {
+        return tok->children[nth];
+    }
+
+    unsigned      nthblk = (nth - NIXP_TOK_DIRECT) / NIXP_TOK_INDIRECT;
+    unsigned      offset = (nth - NIXP_TOK_DIRECT) % NIXP_TOK_INDIRECT;
+    NixpChildren *blkp   = tok->more_children;
+    for (unsigned n = nthblk; n >= 0; --n) {
+        if (blkp == NULL) {
+            fprintf(stderr, "expecting token block");
+            return -1;
+        }
+
+        if (n == 0) {
+            return blkp->children[offset];
+        }
+
+        if (n > 0) {
+            blkp = blkp->next;
+            continue;
+        }
+    }
+    return -1;
+}
+
+
+/* Build a nixp tree */
 void nixp_tree (NixpTree *tree, NixpParser *p, const char *input, size_t size) {
     tree->tree  = p->pool;
     tree->ntoks = p->next;
     tree->input = input;
     tree->size  = size;
+
+    if (tree->size == 0) { // empty tree
+        tree->depth = 0;
+        tree->dmap  = 0;
+        tree->dsize = 0;
+        return;
+    }
+
+    build_tree_dmap (tree, p, input, size);
+    build_tree_children (tree, p, input, size);
 }
 
 
 static void nixp_dump_token(FILE *fp, const NixpToken *tok, int toknum, const char *input, size_t size) {
     if (tok == NULL) {
-        fprintf(fp, "NULL\n");
+        fprintf (fp, "NULL\n");
     }
     const char *type;
     switch (tok->type) {
@@ -382,17 +541,60 @@ static void nixp_dump_token(FILE *fp, const NixpToken *tok, int toknum, const ch
     case NIX_NULL:       type = "NIX_NULL"; break;
     }
 
-    fprintf(fp, "TOKEN %d\n", toknum);
-    fprintf(fp, "  type:   %s\n", type);
-    fprintf(fp, "  start:  %d\n", tok->start);
-    fprintf(fp, "  end:    %d\n", tok->end);
-    fprintf(fp, "  size:   %d\n", tok->size);
-    fprintf(fp, "  parent: %d\n", tok->parent);
-    fprintf(fp, "  span:   %.*s\n", tok->end - tok->start, &input[tok->start]);
+    fprintf (fp, "TOKEN %d\n", toknum);
+    fprintf (fp, "  type:   %s\n", type);
+    fprintf (fp, "  start:  %d\n", tok->start);
+    fprintf (fp, "  end:    %d\n", tok->end);
+    fprintf (fp, "  size:   %d\n", tok->size);
+    fprintf (fp, "  parent: %d\n", tok->parent);
+    fprintf (fp, "  child:  ");
+    for (int i = 0; i < tok->nchildren; ++i) {
+        fprintf (fp, "%d ", nixp_tok_get_child(tok, i));
+    }
+    fprintf (fp, "\n");
+
+    fprintf (fp, "  span:   %.*s\n", tok->end - tok->start, &input[tok->start]);
 }
+
 
 void nixp_dump(FILE *fp, NixpTree *tree) {
     for (int i = 0; i < tree->ntoks; ++i) {
-        nixp_dump_token(fp, &tree->tree[i], i, tree->input, tree->size);
+        nixp_dump_token (fp, &tree->tree[i], i, tree->input, tree->size);
     }
+}
+
+
+/* Access tree elements from NixpTree.
+ *  e.g nixp_access(&t, "program.%s.enabled", neovim);
+ *
+ *  @return  on errors return -1.
+ * */
+int nixp_access (NixpTree *tree, const char *fmt, ...) {
+    va_list args;
+    va_start (args, fmt);
+    char buffer[512];
+
+    int size = vsnprintf (buffer, 512, fmt, args);
+    va_end (args);
+    if (size < 0) {
+        fprintf(stderr, "invalid query\n");
+        return -1;
+    }
+
+    if (size >= 256) {
+        fprintf(stderr, "query has too many characters\n");
+        return -1;
+    }
+
+    char      *endptr;
+    NixpToken *tok;
+    int        d = 0;
+
+    for (char *t = strtok_r (buffer, ".", &endptr);
+         t != NULL;
+         t = strtok_r (0, ".", &endptr)) {
+
+    }
+
+    return 0;
 }

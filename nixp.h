@@ -28,12 +28,32 @@ typedef enum {
 } NixpError;
 
 
-typedef struct {
-    NixpType type;
-    int      start;
-    int      end;
-    int      size;   // size of the collection
-    int      parent; // parent link
+#define NIXP_TOK_DIRECT   4
+#define NIXP_TOK_INDIRECT 32
+
+
+typedef struct NixpChildren {
+    struct NixpChildren *next;
+    unsigned             children[NIXP_TOK_DIRECT];
+} NixpChildren;
+
+typedef struct NixpToken {
+    NixpType       type;
+    int            start;
+    int            end;
+    int            size; // size of the collection
+    int            parent; // parent link
+
+    /* Store indecies of children of the token.
+     * The first 4 children are stored directly in the token. More
+     * children are stored in NixChildren, which is a linked list
+     * that each node can hold 32 integers.
+     * */
+
+    /* first 4 children of the token. -1 indicates no child. */
+    int            children[NIXP_TOK_DIRECT];
+    NixpChildren  *more_children; // link to extra children.
+    unsigned       nchildren;  // number of children
 } NixpToken;
 
 
@@ -51,6 +71,18 @@ typedef struct {
     unsigned    ntoks; // number of tokens
     const char *input; // input
     size_t      size;  // input size
+
+    /* We store the depth map to simplify the query.
+     *
+     * The dmap contains 0 - depth entries, each entry
+     * points to an array that holds all the tokens with
+     * the same depth.
+     *
+     * Both depth map and entries are allocated on the arena.
+     * */
+    size_t      depth; // tree depth
+    int       **dmap;  // depth map, size of `depth`.
+    unsigned   *dsize; // array of number of elements for each depth.
 } NixpTree;
 
 
@@ -58,3 +90,5 @@ void nixp_init (NixpParser *);
 int  nixp_parse (NixpParser *parser, const char *input, size_t size);
 void nixp_tree (NixpTree *tree, NixpParser *p, const char *input, size_t size);
 void nixp_dump(FILE *fp, NixpTree *tree);
+int  nixp_tok_get_child(const NixpToken *tok, unsigned nth);
+int  nixp_access(NixpTree *tree, const char *fmt, ...);
