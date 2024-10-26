@@ -75,14 +75,12 @@ typedef struct {
     size_t      size;  // input size
 
     /* We store the depth map to simplify the query.
-     *
      * The dmap contains 0 - depth entries, each entry
      * points to an array that holds all the tokens with
      * the same depth.
-     *
      * Both depth map and entries are allocated on the arena.
      * */
-    size_t      depth; // tree depth
+    size_t      ndepth; // tree depth
     int       **dmap;  // depth map, size of `depth`.
     unsigned   *dsize; // array of number of elements for each depth.
 } NixpTree;
@@ -93,4 +91,4 @@ int  nixp_parse (NixpParser *parser, const char *input, size_t size);
 void nixp_tree (NixpTree *tree, NixpParser *p, const char *input, size_t size);
 void nixp_dump(FILE *fp, NixpTree *tree);
 int  nixp_tok_get_child(const NixpToken *tok, unsigned nth);
-int  nixp_access(NixpTree *tree, const char *fmt, ...);
+int  nixp_access(NixpTree *tree, const char *path);

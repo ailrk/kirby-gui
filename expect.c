@@ -175,7 +175,7 @@ exp_h * exp_spawnvf (unsigned flags, const char *file, char **argv) {
     if (!(flags & EXP_SPAWN_KEEP_SIGNALS)) {
       struct sigaction sa;
       int i;
-;
+
       /* Remove all signal handlers.  See the justification here:
        * https://www.redhat.com/archives/libvir-list/2008-August/msg00303.html
        * We don't mask signal handlers yet, so this isn't completely
